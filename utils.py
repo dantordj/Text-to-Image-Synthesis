@@ -9,6 +9,8 @@ import pdb
 class Concat_embed(nn.Module):
 
     def __init__(self, embed_dim, projected_embed_dim):
+        # init function
+        
         super(Concat_embed, self).__init__()
         self.projection = nn.Sequential(
             nn.Linear(in_features=embed_dim, out_features=projected_embed_dim),
