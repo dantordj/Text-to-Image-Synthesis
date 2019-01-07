@@ -162,10 +162,10 @@ class Trainer(object):
                 self.logger.draw(right_images, fake_images)
                 self.logger.log_iteration_wgan(epoch, gen_iteration, d_loss, g_loss, real_loss, fake_loss)
                 
-            self.logger.plot_epoch(gen_iteration)
+            self.logger.plot_epoch_w_scores(epoch)
 
-            if (epoch+1) % 50 == 0:
-                Utils.save_checkpoint(self.discriminator, self.generator, self.checkpoints_path, epoch)
+            if (epoch+1) % 10 == 0:
+                Utils.save_checkpoint(self.discriminator, self.generator, self.checkpoints_path, self.save_path,  epoch)
 
     def _train_gan(self, cls):
         criterion = nn.BCELoss()
