@@ -188,8 +188,11 @@ class Trainer(object):
                     self.logger.log_iteration_wgan(epoch, gen_iteration, d_loss, g_loss, real_loss, fake_loss)
 
             if self.visualize:
+                self.logger.draw(right_images, fake_images)
+                self.logger.log_iteration_wgan(epoch, gen_iteration, d_loss, g_loss, real_loss, fake_loss)
                 self.logger.plot_epoch(gen_iteration)
 
+            self.logger.plot_epoch_w_scores(epoch)
             if (epochs+1) % 50 == 0:
                 Utils.save_checkpoint(self.discriminator, self.generator, self.checkpoints_path, epoch)
                 Utils.save_checkpoint(self.discriminator, self.generator, self.checkpoints_path, self.save_path, epoch)
