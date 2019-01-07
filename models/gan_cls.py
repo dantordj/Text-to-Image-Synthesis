@@ -89,7 +89,7 @@ class discriminator(nn.Module):
 			# state size. (ndf*8) x 4 x 4
 			nn.Conv2d(self.ndf * 8 + self.projected_embed_dim, 1, 4, 1, 0, bias=False),
 			nn.Sigmoid()
-			)	
+			)
 
 	def forward(self, inp, embed):
 		x_intermediate = self.netD_1(inp)
@@ -97,3 +97,52 @@ class discriminator(nn.Module):
 		x = self.netD_2(x)
 
 		return x.view(-1, 1).squeeze(1) , x_intermediate
+
+
+
+
+class encoder(nn.Module):
+
+	def __init__(self):
+		super(encoder, self).__init__()
+		self.noise_dim = 100
+		self.embed_dim = 1024
+		self.projected_embed_dim = 128
+		self.latent_dim = self.noise_dim + self.projected_embed_dim
+		self.ndf = 64
+		self.image_size = 64
+		self.num_channels = 3
+
+		self.NetE_1 = nn.Sequential(
+			# input is (nc) x 64 x 64
+			nn.Conv2d(self.num_channels, self.ndf, 4, 2, 1, bias=False),
+			nn.LeakyReLU(0.2, inplace=True),
+			# state size. (ndf) x 32 x 32
+			nn.Conv2d(self.ndf, self.ndf * 2, 4, 2, 1, bias=False),
+			nn.BatchNorm2d(self.ndf * 2),
+			nn.LeakyReLU(0.2, inplace=True),
+			# state size. (ndf*2) x 16 x 16
+			nn.Conv2d(self.ndf * 2, self.ndf * 4, 4, 2, 1, bias=False),
+			nn.BatchNorm2d(self.ndf * 4),
+			nn.LeakyReLU(0.2, inplace=True),
+			# state size. (ndf*4) x 8 x 8
+			nn.Conv2d(self.ndf * 4, self.ndf * 8, 4, 2, 1, bias=False),
+			nn.BatchNorm2d(self.ndf * 8),
+			nn.LeakyReLU(0.2, inplace=True),
+		)
+		self.projector = Concat_embed(self.embed_dim, self.projected_embed_dim)
+
+		self.conv_2 = nn.Sequential(
+			# state size. (ndf*8) x 4 x 4
+			nn.Conv2d(self.ndf * 8 + self.projected_embed_dim, self.noise_dim * 2, 4, 1, 0, bias=False),
+		)
+		self.linear = nn.Linear(self.noise_dim * 2, self.noise_dim)
+
+	def forward(self, inp, embed):
+		x_intermediate = self.NetE_1(inp)
+		x = self.projector(x_intermediate, embed)
+		x = self.conv_2(x)
+		x = x.view(x.size()[0], -1).squeeze(1)
+		x = self.linear(x)
+
+		return x

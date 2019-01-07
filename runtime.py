@@ -15,11 +15,13 @@ parser.add_argument("--save_path", default='')
 parser.add_argument("--inference", default=False, action='store_true')
 parser.add_argument('--pre_trained_disc', default=None)
 parser.add_argument('--pre_trained_gen', default=None)
+parser.add_argument('--pre_trained_encod', default=None)
 parser.add_argument('--dataset', default='flowers')
 parser.add_argument('--split', default=0, type=int)
 parser.add_argument('--batch_size', default=64, type=int)
 parser.add_argument('--num_workers', default=8, type=int)
 parser.add_argument('--epochs', default=200, type=int)
+parser.add_argument('--visualize', default=False, type=bool)
 args = parser.parse_args()
 
 trainer = Trainer(type=args.type,
@@ -33,13 +35,14 @@ trainer = Trainer(type=args.type,
                   l2_coef=args.l2_coef,
                   pre_trained_disc=args.pre_trained_disc,
                   pre_trained_gen=args.pre_trained_gen,
+                  pre_trained_encod=args.pre_trained_encod,
                   batch_size=args.batch_size,
                   num_workers=args.num_workers,
-                  epochs=args.epochs
+                  epochs=args.epochs,
+                  visualize=args.visualize
                   )
 
 if not args.inference:
     trainer.train(args.cls)
 else:
     trainer.predict()
-
