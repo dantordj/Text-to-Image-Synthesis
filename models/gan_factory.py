@@ -23,3 +23,7 @@ class gan_factory(object):
             return gan.discriminator()
         elif type == 'vanilla_wgan':
             return wgan.discriminator()
+    @staticmethod
+    def encoder_factory(type):
+        if type == 'gan':
+            return gan_cls.encoder()

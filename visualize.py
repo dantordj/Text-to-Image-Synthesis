@@ -10,7 +10,7 @@ class VisdomPlotter(object):
     """Plots to Visdom"""
 
     def __init__(self, env_name='gan'):
-        self.viz = Visdom(port='800')
+        self.viz = Visdom(server="http://0.0.0.0", port="800")
         self.env = env_name
         self.plots = {}
 
@@ -23,7 +23,7 @@ class VisdomPlotter(object):
                 ylabel=var_name
             ))
         else:
-            self.viz.line(X=np.array([x]), Y=np.array([y]), env=self.env, win=self.plots[var_name], name=split_name, update="append")
+            self.viz.line(X=np.array([x]), Y=np.array([y]), update="append", env=self.env, win=self.plots[var_name], name=split_name)
 
     def draw(self, var_name, images):
         if var_name not in self.plots:

@@ -11,14 +11,22 @@ from utils import Utils, Logger
 from PIL import Image
 import os
 
+cuda = torch.cuda.is_available()
+
+
 class Trainer(object):
-    def __init__(self, type, dataset, split, lr, diter, vis_screen, save_path, l1_coef, l2_coef, pre_trained_gen, pre_trained_disc, batch_size, num_workers, epochs):
+    def __init__(self, type, dataset, split, lr, diter, vis_screen, save_path, l1_coef, l2_coef, pre_trained_gen, pre_trained_disc, pre_trained_encod, batch_size, num_workers, epochs, visualize):
         with open('config.yaml', 'r') as f:
             config = yaml.load(f)
 
-        self.generator = torch.nn.DataParallel(gan_factory.generator_factory(type).cuda())
-        self.discriminator = torch.nn.DataParallel(gan_factory.discriminator_factory(type).cuda())
-
+        if cuda:
+            self.generator = torch.nn.DataParallel(gan_factory.generator_factory(type).cuda())
+            self.discriminator = torch.nn.DataParallel(gan_factory.discriminator_factory(type).cuda())
+            self.encoder = torch.nn.DataParallel(gan_factory.encoder_factory(type).cuda())
+        else:
+            self.generator = torch.nn.DataParallel(gan_factory.generator_factory(type))
+            self.discriminator = torch.nn.DataParallel(gan_factory.discriminator_factory(type))
+            self.encoder = torch.nn.DataParallel(gan_factory.encoder_factory(type))
         if pre_trained_disc:
             self.discriminator.load_state_dict(torch.load(pre_trained_disc))
         else:
@@ -28,6 +36,11 @@ class Trainer(object):
             self.generator.load_state_dict(torch.load(pre_trained_gen))
         else:
             self.generator.apply(Utils.weights_init)
+
+        if pre_trained_encod:
+            self.encoder.load_state_dict(torch.load(pre_trained_encod))
+        else:
+            self.encoder.apply(Utils.weights_init)
 
         if dataset == 'birds':
             self.dataset = Text2ImageDataset(config['birds_dataset_path'], split=split)
@@ -53,11 +66,14 @@ class Trainer(object):
 
         self.optimD = torch.optim.Adam(self.discriminator.parameters(), lr=self.lr, betas=(self.beta1, 0.999))
         self.optimG = torch.optim.Adam(self.generator.parameters(), lr=self.lr, betas=(self.beta1, 0.999))
+        self.optimE = torch.optim.Adam(self.encoder.parameters(), lr=self.lr, betas=(self.beta1, 0.999))
 
-        self.logger = Logger(vis_screen)
         self.checkpoints_path = 'checkpoints'
         self.save_path = save_path
         self.type = type
+        self.visualize = visualize
+        if self.visualize:
+            self.logger = Logger(vis_screen)
 
     def train(self, cls=False):
 
@@ -71,11 +87,12 @@ class Trainer(object):
             self._train_vanilla_gan()
 
     def _train_wgan(self, cls):
-        one = torch.FloatTensor([1])
-        mone = one * -1
+        one = Variable(torch.FloatTensor([1]))
+        mone = Variable(one * -1)
 
-        one = Variable(one).cuda()
-        mone = Variable(mone).cuda()
+        if cuda:
+            one = Variable(one).cuda()
+            mone = Variable(mone).cuda()
 
         gen_iteration = 0
         for epoch in range(self.num_epochs):
@@ -107,9 +124,13 @@ class Trainer(object):
                     right_embed = sample['right_embed']
                     wrong_images = sample['wrong_images']
 
-                    right_images = Variable(right_images.float()).cuda()
-                    right_embed = Variable(right_embed.float()).cuda()
-                    wrong_images = Variable(wrong_images.float()).cuda()
+                    right_images = Variable(right_images.float())
+                    right_embed = Variable(right_embed.float())
+                    wrong_images = Variable(wrong_images.float())
+                    if cuda:
+                        right_images = right_images.cuda()
+                        right_embed = right_embed.cuda()
+                        wrong_images = wrong_images.cuda()
 
                     outputs, _ = self.discriminator(right_images, right_embed)
                     real_loss = torch.mean(outputs)
@@ -120,7 +141,9 @@ class Trainer(object):
                         wrong_loss = torch.mean(outputs)
                         wrong_loss.backward(one)
 
-                    noise = Variable(torch.randn(right_images.size(0), self.noise_dim), volatile=True).cuda()
+                    noise = Variable(torch.randn(right_images.size(0), self.noise_dim), volatile=True)
+                    if cuda:
+                        noise = noise.cuda()
                     noise = noise.view(noise.size(0), self.noise_dim, 1, 1)
 
                     fake_images = Variable(self.generator(right_embed, noise).data)
@@ -147,7 +170,9 @@ class Trainer(object):
                 for p in self.discriminator.parameters():
                     p.requires_grad = False
                 self.generator.zero_grad()
-                noise = Variable(torch.randn(right_images.size(0), 100)).cuda()
+                noise = Variable(torch.randn(right_images.size(0), 100))
+                if cuda:
+                    noise = noise.cuda()
                 noise = noise.view(noise.size(0), 100, 1, 1)
                 fake_images = self.generator(right_embed, noise)
                 outputs, _ = self.discriminator(fake_images, right_embed)
@@ -158,31 +183,39 @@ class Trainer(object):
                 self.optimG.step()
 
                 gen_iteration += 1
+                if self.visualize:
+                    self.logger.draw(right_images, fake_images)
+                    self.logger.log_iteration_wgan(epoch, gen_iteration, d_loss, g_loss, real_loss, fake_loss)
 
+            if self.visualize:
                 self.logger.draw(right_images, fake_images)
                 self.logger.log_iteration_wgan(epoch, gen_iteration, d_loss, g_loss, real_loss, fake_loss)
-                
-            self.logger.plot_epoch_w_scores(epoch)
+                self.logger.plot_epoch(gen_iteration)
 
-            if (epoch+1) % 10 == 0:
-                Utils.save_checkpoint(self.discriminator, self.generator, self.checkpoints_path, self.save_path,  epoch)
+            self.logger.plot_epoch_w_scores(epoch)
+            if (epochs+1) % 50 == 0:
+                Utils.save_checkpoint(self.discriminator, self.generator, self.checkpoints_path, epoch)
+                Utils.save_checkpoint(self.discriminator, self.generator, self.checkpoints_path, self.save_path, epoch)
+
 
     def _train_gan(self, cls):
         criterion = nn.BCELoss()
         l2_loss = nn.MSELoss()
         l1_loss = nn.L1Loss()
+        l1_loss_bis = nn.L1Loss()
         iteration = 0
 
         for epoch in range(self.num_epochs):
             for sample in self.data_loader:
                 iteration += 1
-                right_images = sample['right_images']
-                right_embed = sample['right_embed']
-                wrong_images = sample['wrong_images']
+                right_images = Variable(sample['right_images'].float())
+                right_embed = Variable(sample['right_embed'].float())
+                wrong_images = Variable(sample['wrong_images'].float())
 
-                right_images = Variable(right_images.float()).cuda()
-                right_embed = Variable(right_embed.float()).cuda()
-                wrong_images = Variable(wrong_images.float()).cuda()
+                if cuda:
+                    right_images = right_images.cuda()
+                    right_embed = right_embed.cuda()
+                    wrong_images = wrong_images.cuda()
 
                 real_labels = torch.ones(right_images.size(0))
                 fake_labels = torch.zeros(right_images.size(0))
@@ -193,9 +226,15 @@ class Trainer(object):
                 # =============================================
                 smoothed_real_labels = torch.FloatTensor(Utils.smooth_label(real_labels.numpy(), -0.1))
 
-                real_labels = Variable(real_labels).cuda()
-                smoothed_real_labels = Variable(smoothed_real_labels).cuda()
-                fake_labels = Variable(fake_labels).cuda()
+                real_labels = Variable(real_labels)
+                smoothed_real_labels = Variable(smoothed_real_labels)
+                fake_labels = Variable(fake_labels)
+                if cuda:
+                    real_labels = real_labels.cuda()
+                    smoothed_real_labels = smoothed_real_labels.cuda()
+                    fake_labels = fake_labels.cuda()
+
+
 
                 # Train the discriminator
                 self.discriminator.zero_grad()
@@ -208,7 +247,9 @@ class Trainer(object):
                     wrong_loss = criterion(outputs, fake_labels)
                     wrong_score = outputs
 
-                noise = Variable(torch.randn(right_images.size(0), 100)).cuda()
+                noise = Variable(torch.randn(right_images.size(0), 100))
+                if cuda:
+                    noise = noise.cuda()
                 noise = noise.view(noise.size(0), 100, 1, 1)
                 fake_images = self.generator(right_embed, noise)
                 outputs, _ = self.discriminator(fake_images, right_embed)
@@ -225,7 +266,9 @@ class Trainer(object):
 
                 # Train the generator
                 self.generator.zero_grad()
-                noise = Variable(torch.randn(right_images.size(0), 100)).cuda()
+                noise = Variable(torch.randn(right_images.size(0), 100))
+                if cuda:
+                    noise = noise.cuda()
                 noise = noise.view(noise.size(0), 100, 1, 1)
                 fake_images = self.generator(right_embed, noise)
                 outputs, activation_fake = self.discriminator(fake_images, right_embed)
@@ -249,100 +292,119 @@ class Trainer(object):
                 g_loss.backward()
                 self.optimG.step()
 
-                if iteration % 5 == 0:
-                    self.logger.log_iteration_gan(epoch,d_loss, g_loss, real_score, fake_score)
+                # Train the encoder
+
+                fake_noises = self.encoder(fake_images.detach(), right_embed)
+                e_loss = l1_loss_bis(fake_noises, noise)
+                e_loss.backward()
+                self.optimE.step()
+
+                if iteration % 5 == 0 and self.visualize:
+                    self.logger.log_iteration_gan(epoch,d_loss, g_loss, e_loss, real_score, fake_score)
                     self.logger.draw(right_images, fake_images)
 
-            self.logger.plot_epoch_w_scores(epoch)
-
+            if self.visualize:
+                self.logger.plot_epoch_w_scores(epoch)
+            print(epoch)
             if (epoch) % 10 == 0:
                 Utils.save_checkpoint(self.discriminator, self.generator, self.checkpoints_path, self.save_path, epoch)
 
     def _train_vanilla_wgan(self):
-        one = Variable(torch.FloatTensor([1])).cuda()
+        one = Variable(torch.FloatTensor([1]))
+        if cuda:
+            one = one.cuda()
         mone = one * -1
         gen_iteration = 0
 
         for epoch in range(self.num_epochs):
-         iterator = 0
-         data_iterator = iter(self.data_loader)
+            iterator = 0
+            data_iterator = iter(self.data_loader)
 
-         while iterator < len(self.data_loader):
+            while iterator < len(self.data_loader):
 
-             if gen_iteration < 25 or gen_iteration % 500 == 0:
-                 d_iter_count = 100
-             else:
-                 d_iter_count = self.DITER
+                 if gen_iteration < 25 or gen_iteration % 500 == 0:
+                     d_iter_count = 100
+                 else:
+                     d_iter_count = self.DITER
 
-             d_iter = 0
+                 d_iter = 0
 
-             # Train the discriminator
-             while d_iter < d_iter_count and iterator < len(self.data_loader):
-                 d_iter += 1
+                 # Train the discriminator
+                 while d_iter < d_iter_count and iterator < len(self.data_loader):
+                     d_iter += 1
 
+                     for p in self.discriminator.parameters():
+                         p.requires_grad = True
+
+                     self.discriminator.zero_grad()
+
+                     sample = next(data_iterator)
+                     iterator += 1
+
+                     right_images = sample['right_images']
+                     right_images = Variable(right_images.float())
+                     if cuda:
+                         right_images = right_images.cuda()
+
+                     outputs, _ = self.discriminator(right_images)
+                     real_loss = torch.mean(outputs)
+                     real_loss.backward(mone)
+
+                     noise = Variable(torch.randn(right_images.size(0), self.noise_dim), volatile=True)
+                     if cuda:
+                         noise = noise.cuda()
+                     noise = noise.view(noise.size(0), self.noise_dim, 1, 1)
+
+                     fake_images = Variable(self.generator(noise).data)
+                     outputs, _ = self.discriminator(fake_images)
+                     fake_loss = torch.mean(outputs)
+                     fake_loss.backward(one)
+
+                     ## NOTE: Pytorch had a bug with gradient penalty at the time of this project development
+                     ##       , uncomment the next two lines and remove the params clamping below if you want to try gradient penalty
+                     # gp = Utils.compute_GP(self.discriminator, right_images.data, right_embed, fake_images.data, LAMBDA=10)
+                     # gp.backward()
+
+                     d_loss = real_loss - fake_loss
+                     self.optimD.step()
+
+                     for p in self.discriminator.parameters():
+                         p.data.clamp_(-0.01, 0.01)
+
+                 # Train Generator
                  for p in self.discriminator.parameters():
-                     p.requires_grad = True
+                     p.requires_grad = False
 
-                 self.discriminator.zero_grad()
-
-                 sample = next(data_iterator)
-                 iterator += 1
-
-                 right_images = sample['right_images']
-                 right_images = Variable(right_images.float()).cuda()
-
-                 outputs, _ = self.discriminator(right_images)
-                 real_loss = torch.mean(outputs)
-                 real_loss.backward(mone)
-
-                 noise = Variable(torch.randn(right_images.size(0), self.noise_dim), volatile=True).cuda()
-                 noise = noise.view(noise.size(0), self.noise_dim, 1, 1)
-
-                 fake_images = Variable(self.generator(noise).data)
+                 self.generator.zero_grad()
+                 noise = Variable(torch.randn(right_images.size(0), 100))
+                 if cuda:
+                     noise = noise.cuda()
+                 noise = noise.view(noise.size(0), 100, 1, 1)
+                 fake_images = self.generator(noise)
                  outputs, _ = self.discriminator(fake_images)
-                 fake_loss = torch.mean(outputs)
-                 fake_loss.backward(one)
 
-                 ## NOTE: Pytorch had a bug with gradient penalty at the time of this project development
-                 ##       , uncomment the next two lines and remove the params clamping below if you want to try gradient penalty
-                 # gp = Utils.compute_GP(self.discriminator, right_images.data, right_embed, fake_images.data, LAMBDA=10)
-                 # gp.backward()
+                 g_loss = torch.mean(outputs)
+                 g_loss.backward(mone)
+                 g_loss = - g_loss
+                 self.optimG.step()
 
-                 d_loss = real_loss - fake_loss
-                 self.optimD.step()
+                 gen_iteration += 1
 
-                 for p in self.discriminator.parameters():
-                     p.data.clamp_(-0.01, 0.01)
+                 if self.visualize:
+                     self.logger.draw(right_images, fake_images)
+                     self.logger.log_iteration_wgan(epoch, gen_iteration, d_loss, g_loss, real_loss, fake_loss)
 
-             # Train Generator
-             for p in self.discriminator.parameters():
-                 p.requires_grad = False
+            if self.visualize:
+                self.logger.plot_epoch(gen_iteration)
 
-             self.generator.zero_grad()
-             noise = Variable(torch.randn(right_images.size(0), 100)).cuda()
-             noise = noise.view(noise.size(0), 100, 1, 1)
-             fake_images = self.generator(noise)
-             outputs, _ = self.discriminator(fake_images)
-
-             g_loss = torch.mean(outputs)
-             g_loss.backward(mone)
-             g_loss = - g_loss
-             self.optimG.step()
-
-             gen_iteration += 1
-
-             self.logger.draw(right_images, fake_images)
-             self.logger.log_iteration_wgan(epoch, gen_iteration, d_loss, g_loss, real_loss, fake_loss)
-
-         self.logger.plot_epoch(gen_iteration)
-
-         if (epoch + 1) % 50 == 0:
-             Utils.save_checkpoint(self.discriminator, self.generator, self.checkpoints_path, epoch)
+            if (epoch + 1) % 50 == 0:
+                 Utils.save_checkpoint(self.discriminator, self.generator, self.checkpoints_path, epoch)
 
     def _train_vanilla_gan(self):
         criterion = nn.BCELoss()
         l2_loss = nn.MSELoss()
         l1_loss = nn.L1Loss()
+
         iteration = 0
 
         for epoch in range(self.num_epochs):
@@ -350,7 +412,9 @@ class Trainer(object):
                 iteration += 1
                 right_images = sample['right_images']
 
-                right_images = Variable(right_images.float()).cuda()
+                right_images = Variable(right_images.float())
+                if cuda:
+                    right_images = right_images.cuda()
 
                 real_labels = torch.ones(right_images.size(0))
                 fake_labels = torch.zeros(right_images.size(0))
@@ -361,9 +425,16 @@ class Trainer(object):
                 # =============================================
                 smoothed_real_labels = torch.FloatTensor(Utils.smooth_label(real_labels.numpy(), -0.1))
 
-                real_labels = Variable(real_labels).cuda()
-                smoothed_real_labels = Variable(smoothed_real_labels).cuda()
-                fake_labels = Variable(fake_labels).cuda()
+                real_labels = Variable(real_labels)
+                smoothed_real_labels = Variable(smoothed_real_labels)
+                fake_labels = Variable(fake_labels)
+
+                if cuda:
+                    real_labels = real_labels.cuda()
+                    smoothed_real_labels = smoothed_real_labels.cuda()
+                    fake_labels = fake_labels.cuda()
+
+
 
 
                 # Train the discriminator
@@ -372,7 +443,9 @@ class Trainer(object):
                 real_loss = criterion(outputs, smoothed_real_labels)
                 real_score = outputs
 
-                noise = Variable(torch.randn(right_images.size(0), 100)).cuda()
+                noise = Variable(torch.randn(right_images.size(0), 100))
+                if cuda:
+                    noise = noise.cuda()
                 noise = noise.view(noise.size(0), 100, 1, 1)
                 fake_images = self.generator(noise)
                 outputs, _ = self.discriminator(fake_images)
@@ -386,7 +459,9 @@ class Trainer(object):
 
                 # Train the generator
                 self.generator.zero_grad()
-                noise = Variable(torch.randn(right_images.size(0), 100)).cuda()
+                noise = Variable(torch.randn(right_images.size(0), 100))
+                if cuda:
+                    noise = noise.cuda()
                 noise = noise.view(noise.size(0), 100, 1, 1)
                 fake_images = self.generator(noise)
                 outputs, activation_fake = self.discriminator(fake_images)
@@ -408,11 +483,12 @@ class Trainer(object):
                 g_loss.backward()
                 self.optimG.step()
 
-                if iteration % 5 == 0:
-                    self.logger.log_iteration_gan(epoch, d_loss, g_loss, real_score, fake_score)
+                if iteration % 5 == 0 and self.visualize:
+                    self.logger.log_iteration_gan(epoch, d_loss, g_loss, e_loss, real_score, fake_score)
                     self.logger.draw(right_images, fake_images)
 
-            self.logger.plot_epoch_w_scores(iteration)
+            if self.visualize:
+                self.logger.plot_epoch_w_scores(iteration)
 
             if (epoch) % 50 == 0:
                 Utils.save_checkpoint(self.discriminator, self.generator, self.checkpoints_path, epoch)
@@ -426,24 +502,25 @@ class Trainer(object):
             if not os.path.exists('results/{0}'.format(self.save_path)):
                 os.makedirs('results/{0}'.format(self.save_path))
 
-            right_images = Variable(right_images.float()).cuda()
-            right_embed = Variable(right_embed.float()).cuda()
+            right_images = Variable(right_images.float())
+            right_embed = Variable(right_embed.float())
+
+            if cuda:
+                right_images = right_images.cuda()
+                right_embed = right_embed.cuda()
+
 
             # Train the generator
-            noise = Variable(torch.randn(right_images.size(0), 100)).cuda()
+            noise = Variable(torch.randn(right_images.size(0), 100))
+            if cuda:
+                noise = noise.cuda()
             noise = noise.view(noise.size(0), 100, 1, 1)
             fake_images = self.generator(right_embed, noise)
 
-            self.logger.draw(right_images, fake_images)
+            if self.visualize:
+                self.logger.draw(right_images, fake_images)
 
             for image, t in zip(fake_images, txt):
                 im = Image.fromarray(image.data.mul_(127.5).add_(127.5).byte().permute(1, 2, 0).cpu().numpy())
                 im.save('results/{0}/{1}.jpg'.format(self.save_path, t.replace("/", "")[:100]))
                 print(t)
-
-
-
-
-
-
-
