@@ -98,9 +98,67 @@ class discriminator(nn.Module):
 
 		return x.view(-1, 1).squeeze(1) , x_intermediate
 
+class encoder(nn.Module):
+
+    def __init__(self):
+        super(simpleEncoder, self).__init__()
+        self.noise_dim = 100
+        self.projected_embed_dim = 128
+        self.ndf = 6
+        self.image_size = 64
+        self.num_channels = 3
+        self.latent_dim = self.noise_dim + self.projected_embed_dim # 228
+        self.embed_dim = 1024
+
+
+        self.NetE_1 = nn.Sequential(
+
+            nn.Conv2d(self.num_channels, self.ndf, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(self.ndf),
+            nn.ReLU(),
+            nn.Conv2d(self.ndf, self.ndf * 2, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(self.ndf * 2),
+            nn.ReLU(),
+            nn.Conv2d(self.ndf * 2, self.ndf * 4, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(self.ndf * 4),
+            nn.ReLU(),
+            nn.Conv2d(self.ndf * 4, self.ndf * 8, 4, 2, 1, bias=False),
+            nn.BatchNorm2d(self.ndf * 8),
+            nn.ReLU(),
+            nn.ReLU(),
+            nn.Conv2d(self.ndf * 8, self.latent_dim, 4, 1, 0, bias=False),
+            nn.BatchNorm2d(self.latent_dim),
+            nn.ReLU()
+            # state siz self.latent_dim * 4 * 4
+
+        )
+        self.projection = nn.Sequential(
+            nn.Linear(in_features=self.embed_dim, out_features=self.projected_embed_dim),
+            nn.BatchNorm1d(num_features=self.projected_embed_dim),
+            nn.LeakyReLU(negative_slope=0.2, inplace=True)
+        )
+
+        self.linear2 = nn.Sequential(
+            nn.Linear(self.projected_embed_dim + self.latent_dim, 200),
+            nn.ReLU(),
+            nn.Linear(200, 100),
+        )
+
+    def forward(self, inp, emb):
+        x = self.NetE_1(inp)
+        x = x.view(x.size()[0], -1).squeeze(1)
+        emb = self.projection(emb)
+        x = torch.cat([x, emb], 1).squeeze(1)
+
+        x = self.linear2(x)
+
+        return x
 
 
 
+
+
+"""
 class encoder(nn.Module):
 
 	def __init__(self):
@@ -146,3 +204,4 @@ class encoder(nn.Module):
 		x = self.linear(x)
 
 		return x
+"""

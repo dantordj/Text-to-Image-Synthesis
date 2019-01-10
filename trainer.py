@@ -12,7 +12,7 @@ from PIL import Image
 import os
 
 cuda = torch.cuda.is_available()
-
+print("Cuda is_available:", cuda)
 
 class Trainer(object):
     def __init__(self, type, dataset, split, lr, diter, vis_screen, save_path, l1_coef, l2_coef, pre_trained_gen, pre_trained_disc, pre_trained_encod, batch_size, num_workers, epochs, visualize):
@@ -202,7 +202,7 @@ class Trainer(object):
         criterion = nn.BCELoss()
         l2_loss = nn.MSELoss()
         l1_loss = nn.L1Loss()
-        l1_loss_bis = nn.L1Loss()
+        encod_loss = nn.MSELoss()
         iteration = 0
 
         for epoch in range(self.num_epochs):
@@ -293,15 +293,22 @@ class Trainer(object):
                 self.optimG.step()
 
                 # Train the encoder
-
+                self.encoder.zero_grad()
+                if cuda:
+                    noise = noise.cuda()
+                noise = noise.view(noise.size(0), 100, 1, 1)
+                noise = Variable(torch.randn(right_images.size(0), 100))
                 fake_noises = self.encoder(fake_images.detach(), right_embed)
-                e_loss = l1_loss_bis(fake_noises, noise)
+                fake_noises = torch.squeeze(fake_noises)
+                noise = torch.squeeze(noise)
+                e_loss = encod_loss(fake_noises, noise)
                 e_loss.backward()
                 self.optimE.step()
 
                 if iteration % 5 == 0 and self.visualize:
                     self.logger.log_iteration_gan(epoch,d_loss, g_loss, e_loss, real_score, fake_score)
                     self.logger.draw(right_images, fake_images)
+
 
             if self.visualize:
                 self.logger.plot_epoch_w_scores(epoch)
