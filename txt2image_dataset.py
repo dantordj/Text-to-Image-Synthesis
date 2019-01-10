@@ -40,7 +40,11 @@ class Text2ImageDataset(Dataset):
 
         right_image = bytes(np.array(example['img']))
         right_embed = np.array(example['embeddings'], dtype=float)
-        wrong_image = bytes(np.array(self.find_wrong_image(example['class'])))
+        class_image = False
+        if class_image:
+            wrong_image = bytes(np.array(self.find_wrong_image(class=True, example['class'])))
+        else:
+            wrong_image = bytes(np.array(self.find_wrong_image(class=False)))
         inter_embed = np.array(self.find_inter_embed())
 
         right_image = Image.open(io.BytesIO(right_image)).resize((64, 64))
@@ -64,13 +68,15 @@ class Text2ImageDataset(Dataset):
 
         return sample
 
-    def find_wrong_image(self, category):
+    def find_wrong_image(self, class=True, category=''):
         idx = np.random.randint(len(self.dataset_keys))
         example_name = self.dataset_keys[idx]
         example = self.dataset[self.split][example_name]
+        if not class:
+            return example['img']
         _category = example['class']
 
-        if _category != category:
+        if _category != category :
             return example['img']
 
         return self.find_wrong_image(category)
@@ -92,4 +98,3 @@ class Text2ImageDataset(Dataset):
             img = rgb
 
         return img.transpose(2, 0, 1)
-
