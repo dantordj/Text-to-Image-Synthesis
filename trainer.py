@@ -44,6 +44,8 @@ class Trainer(object):
 
         if dataset == 'birds':
             self.dataset = Text2ImageDataset(config['birds_dataset_path'], split=split)
+        elif dataset == "flicker":
+            self.dataset = Text2ImageDataset(config['flickr_dataset_path'], split=split)
         elif dataset == 'flowers':
             self.dataset = Text2ImageDataset(config['flowers_dataset_path'], split=split)
         else:
