@@ -101,7 +101,7 @@ class discriminator(nn.Module):
 class encoder(nn.Module):
 
     def __init__(self):
-        super(simpleEncoder, self).__init__()
+        super(encoder, self).__init__()
         self.noise_dim = 100
         self.projected_embed_dim = 128
         self.ndf = 6
@@ -139,16 +139,16 @@ class encoder(nn.Module):
         )
 
         self.linear2 = nn.Sequential(
-            nn.Linear(self.projected_embed_dim + self.latent_dim, 200),
+            nn.Linear(self.self.latent_dim, 200),
             nn.ReLU(),
             nn.Linear(200, 100),
         )
 
-    def forward(self, inp, emb):
+    def forward(self, inp,):
         x = self.NetE_1(inp)
         x = x.view(x.size()[0], -1).squeeze(1)
-        emb = self.projection(emb)
-        x = torch.cat([x, emb], 1).squeeze(1)
+        #emb = self.projection(emb)
+        #x = torch.cat([x, emb], 1).squeeze(1)
 
         x = self.linear2(x)
 

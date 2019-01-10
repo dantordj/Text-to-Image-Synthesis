@@ -298,12 +298,14 @@ class Trainer(object):
                 self.encoder.zero_grad()
                 if cuda:
                     noise = noise.cuda()
-                noise = noise.view(noise.size(0), 100, 1, 1)
-                noise = Variable(torch.randn(right_images.size(0), 100))
-                fake_noises = self.encoder(fake_images.detach(), right_embed)
+
+                noise = Variable(torch.randn(right_images.size(0), 100)).cuda()
+                noise = noise.view(noise.size(0), 100, 1, 1).cuda()
+                fake_images = self.generator(right_embed, noise).cuda()
+                fake_noises = self.encoder(fake_images.detach()).cuda()
                 fake_noises = torch.squeeze(fake_noises)
-                noise = torch.squeeze(noise)
-                e_loss = encod_loss(fake_noises, noise)
+                noise = torch.squeeze(noise).cuda()
+                e_loss = encod_loss(fake_noises, noise).cuda()
                 e_loss.backward()
                 self.optimE.step()
 
