@@ -118,6 +118,9 @@ class Logger(object):
         self.hist_E = []
         self.hist_Dx = []
         self.hist_DGx = []
+        self.hist_IScore = []
+        self.hist_IScore_std = []
+        self.hist_CScore = []
 
     def log_iteration_wgan(self, epoch, gen_iteration, d_loss, g_loss, real_loss, fake_loss, e_loss):
         print("Epoch: %d, Gen_iteration: %d, d_loss= %f, g_loss= %f, real_loss= %f, fake_loss = %f, e_loss = %f" %
@@ -125,15 +128,23 @@ class Logger(object):
         self.hist_D.append(d_loss.data.cpu().mean())
         self.hist_G.append(g_loss.data.cpu().mean())
 
-    def log_iteration_gan(self, epoch, d_loss, g_loss, e_loss, real_score, fake_score):
-        print("Epoch: %d, d_loss= %f, g_loss= %f, D(X)= %f, D(G(X))= %f, e_loss = %f" % (
+    def log_iteration_gan(self, epoch, d_loss, g_loss, e_loss, real_score, fake_score, incep_score_m=None, incep_score_std=None, color_score=None):
+        print("Epoch: %d, d_loss= %f, g_loss= %f, D(X)= %f, D(G(X))= %f,  incep_score = %f, color_score = %f" % (
             epoch, d_loss.data.cpu().mean(), g_loss.data.cpu().mean(), real_score.data.cpu().mean(),
-            fake_score.data.cpu().mean(), e_loss))
+            fake_score.data.cpu().mean(), incep_score_m, color_score))
         self.hist_D.append(d_loss.data.cpu().mean())
         self.hist_G.append(g_loss.data.cpu().mean())
         self.hist_E.append(e_loss.data.cpu().mean())
         self.hist_Dx.append(real_score.data.cpu().mean())
         self.hist_DGx.append(fake_score.data.cpu().mean())
+        if incep_score_m is None:
+            self.hist_IScore.append(0)
+            self.hist_IScore_std.append(0)
+            self.hist_CScore.append(0)
+        else:
+            self.hist_IScore.append(incep_score_m)
+            self.hist_IScore_std.append(incep_score_std)
+            self.hist_CScore.append(color_score)
 
     def plot_epoch(self, epoch):
         self.viz.plot('Discriminator', 'train', epoch, np.array(self.hist_D).mean())
@@ -148,10 +159,17 @@ class Logger(object):
         self.viz.plot('D(X)', 'train', epoch, np.array(self.hist_Dx).mean())
         self.viz.plot('D(G(X))', 'train', epoch, np.array(self.hist_DGx).mean())
         self.viz.plot("Encoder", "train", epoch, np.array(self.hist_E).mean())
+        self.viz.plot("Inception Score", "train", epoch, np.array(self.hist_IScore).mean())
+        self.viz.plot("Inception Score Std", "train", epoch, np.array(self.hist_IScore_std).mean())
+        self.viz.plit("Color Score", "train", epoch, np.array(self.hist_CScore).mean())
         self.hist_D = []
         self.hist_G = []
         self.hist_Dx = []
         self.hist_DGx = []
+        self.hist_E = []
+        self.hist_IScore = []
+        self.hist_IScore_std = []
+        self.hist_CScore = []
 
     def draw(self, right_images, fake_images):
         self.viz.draw('generated images', fake_images.data.cpu().numpy()[:64] * 128 + 128)
